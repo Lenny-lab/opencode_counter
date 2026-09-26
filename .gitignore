@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Xcode / Swift build output
+vendor/opencode-stats-main/build/
+
+# Rust build output
+vendor/opencode-token-dashboard-master/target/
+
+# Node dependencies
+node_modules/
+
+# Upstream archives and prebuilt binaries
+vendor/*.tar.gz
+vendor/*.dmg
+vendor/*.app/
+
+# Release artifacts (DMG is attached to GitHub Releases, not committed)
+release/*.dmg
+release/staging/
+
+# Logs
+logs/
+*.log
