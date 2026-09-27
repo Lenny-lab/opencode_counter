@@ -82,7 +82,7 @@ final class DashboardWindowManager: NSObject, NSWindowDelegate {
     /// so heatmap / cards / charts stay in sync during active sessions.
     private func startAutoRefresh() {
         autoRefreshTimer?.invalidate()
-        let timer = Timer(timeInterval: 45, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: OpenCodeDatabase.refreshInterval, repeats: true) { [weak self] _ in
             guard let self, self.isVisible else { return }
             if OpenCodeDatabase.shared.dbExists, !OpenCodeDatabase.shared.isLoading {
                 OpenCodeDatabase.shared.daysFilter = DashboardDateRange.dayCount

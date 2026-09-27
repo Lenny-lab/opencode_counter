@@ -178,8 +178,10 @@ class OpenCodeDatabase: ObservableObject {
     private var refreshQueued = false
     private var fallbackRefreshTimer: Timer?
     private var isPopoverVisible = false
+    private var lastWatcherRefreshAt = Date.distantPast
 
     static let shared = OpenCodeDatabase()
+    static let refreshInterval: TimeInterval = 15 * 60
 
     var dbPath: String {
         let env = ProcessInfo.processInfo.environment
@@ -1053,7 +1055,11 @@ class OpenCodeDatabase: ObservableObject {
         liveRefreshWorkItem?.cancel()
 
         let workItem = DispatchWorkItem { [weak self] in
-            self?.refreshLiveState()
+            guard let self else { return }
+            let now = Date()
+            guard now.timeIntervalSince(self.lastWatcherRefreshAt) >= Self.refreshInterval else { return }
+            self.lastWatcherRefreshAt = now
+            self.refreshLiveState()
         }
 
         liveRefreshWorkItem = workItem
@@ -1064,7 +1070,7 @@ class OpenCodeDatabase: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.fallbackRefreshTimer?.invalidate()
-            self.fallbackRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+            self.fallbackRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
                 self?.refresh(backgroundTriggered: true)
                 self?.refreshLiveState()
             }
