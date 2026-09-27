@@ -1094,7 +1094,9 @@ struct HeatmapCard: View {
             .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
             .allowsHitTesting(false)
             .fixedSize()
-            .offset(y: -6)
+            // Keep the bubble fully above the hovered cell so the pointer never
+            // covers the date or value text.
+            .offset(y: -52)
         }
     }
 
@@ -1110,10 +1112,9 @@ struct HeatmapCard: View {
 
         let values = Dictionary(uniqueKeysWithValues: series.days.map { ($0.day, metric.value($0)) })
 
-        // Keep a full-year calendar canvas like Codex's activity view. Short
-        // filters still control the values and totals, while earlier dates are
-        // rendered as quiet empty cells so the heatmap remains a readable
-        // timeline instead of collapsing into a few isolated columns.
+        // Keep a twelve-month calendar canvas like Codex's activity view so the
+        // heatmap remains a readable timeline instead of collapsing into a few
+        // isolated columns.
         let currentMonthStart = cal.date(
             from: cal.dateComponents([.year, .month], from: lastDate)
         ) ?? lastDate
