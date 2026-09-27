@@ -37,7 +37,21 @@ enum D {
     static let hairline = Color.white.opacity(0.09)
     static let subtleBorder = Color.white.opacity(0.12)
     static let secondaryFill = Color(hex: 0x0A0D14)
-    static let cellEmpty = Color(hex: 0x0B0D13).opacity(0.55)
+    static let cellEmpty = Color.white.opacity(0.07)
+}
+
+enum DashboardDateRange {
+    static let label = "最近 12 个月"
+
+    static var dayCount: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let currentMonthStart = calendar.date(
+            from: calendar.dateComponents([.year, .month], from: today)
+        ) ?? today
+        let start = calendar.date(byAdding: .month, value: -11, to: currentMonthStart) ?? today
+        return (calendar.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+    }
 }
 
 // MARK: - Metric selector (subset of the web METRIC_OPTIONS)
@@ -306,13 +320,8 @@ struct DashboardView: View {
     @State private var metric: DashMetric = .total
     @State private var showExport = false
 
-    private let ranges: [(label: String, days: Int?)] = [
-        ("7 天", 7), ("30 天", 30), ("90 天", 90),
-        ("180 天", 180), ("365 天", 365), ("全部", nil)
-    ]
-
     private var series: UsageSeries {
-        var s = UsageSeries(cells: db.stats.heatmap, daysFilter: db.daysFilter)
+        var s = UsageSeries(cells: db.stats.heatmap, daysFilter: DashboardDateRange.dayCount)
         s.currentMetric = metric
         return s
     }
@@ -339,7 +348,11 @@ struct DashboardView: View {
         .background(D.background)
         .preferredColorScheme(.dark)
         .onAppear {
-            if db.stats.heatmap.isEmpty && !db.isLoading {
+            let annualDays = DashboardDateRange.dayCount
+            if db.daysFilter != annualDays {
+                db.daysFilter = annualDays
+                db.refresh()
+            } else if db.stats.heatmap.isEmpty && !db.isLoading {
                 db.refresh()
             }
         }
@@ -441,7 +454,7 @@ struct DashboardView: View {
                             icon: "waveform.path.ecg",
                             color: D.primary,
                             label: "当前范围",
-                            value: rangeLabel
+                            value: DashboardDateRange.label
                         )
                         metaCard(
                             icon: "number",
@@ -516,40 +529,6 @@ struct DashboardView: View {
 
     private var controls: some View {
         HStack(spacing: 10) {
-            Text("范围")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(D.muted)
-
-            HStack(spacing: 2) {
-                ForEach(ranges, id: \.label) { range in
-                    let selected = db.daysFilter == range.days
-                    Button {
-                        db.daysFilter = range.days
-                        db.refresh()
-                    } label: {
-                        Text(range.label)
-                            .font(.system(size: 12, weight: selected ? .medium : .regular))
-                            .foregroundStyle(selected ? D.primary : D.foreground.opacity(0.8))
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(selected ? D.primary.opacity(0.15) : Color.clear)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(
-                                        selected ? D.primary.opacity(0.30) : D.subtleBorder,
-                                        lineWidth: 1
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel(range.label)
-                }
-            }
-
             Spacer(minLength: 12)
 
             Menu {
@@ -591,6 +570,7 @@ struct DashboardView: View {
             .accessibilityLabel("指标 \(metric.label)")
 
             Button {
+                db.daysFilter = DashboardDateRange.dayCount
                 db.refresh()
             } label: {
                 HStack(spacing: 6) {
@@ -670,11 +650,6 @@ struct DashboardView: View {
             let isToday = latest?.day == series.today
             let peak = series.peak(metric)
             let avg = series.dayCount > 0 ? series.total(metric) / Int64(series.dayCount) : 0
-            let rangeDaysText: String = {
-                if let filter = db.daysFilter { return "\(filter) 天" }
-                return "\(series.dayCount) 天"
-            }()
-
             summaryCard(
                 label: latest == nil ? "暂无数据" : (isToday ? "今天" : "最近一天"),
                 value: latest.map { Formatters.full(metric.value($0)) } ?? "0",
@@ -685,7 +660,7 @@ struct DashboardView: View {
             summaryCard(
                 label: "合计",
                 value: Formatters.full(series.total(metric)),
-                subtitle: rangeDaysText,
+                subtitle: DashboardDateRange.label,
                 icon: "chart.bar",
                 accent: D.chart2
             )
@@ -826,17 +801,6 @@ struct DashboardView: View {
             .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private var rangeLabel: String {
-        switch db.daysFilter {
-        case 7: "最近 7 天"
-        case 30: "最近 30 天"
-        case 90: "最近 90 天"
-        case 180: "最近 180 天"
-        case 365: "最近 365 天"
-        default: "全部时间"
-        }
     }
 
     private func unavailableView(icon: String, title: String, message: String) -> some View {
@@ -993,7 +957,7 @@ struct HeatmapCard: View {
         return min(5, max(1, Int(ceil(ratio * 5))))
     }
 
-    // MARK: calendar grid (weeks × weekdays, for 180/365/all)
+    // MARK: calendar grid (weeks × weekdays, one cell per day)
 
     private struct CalendarDay: Identifiable {
         let date: String
@@ -1005,72 +969,83 @@ struct HeatmapCard: View {
     private var calendarGrid: some View {
         let weeks = calendarWeeks
         guard !weeks.isEmpty else { return AnyView(EmptyView()) }
-        // One cell = one whole day; scale up when the range only spans few weeks.
-        let size: CGFloat = weeks.count <= 2 ? 40 : weeks.count <= 5 ? 30 : weeks.count <= 10 ? 22 : weeks.count <= 20 ? 16 : weeks.count <= 40 ? 13 : 11
         let gap: CGFloat = 3
-        let labelW: CGFloat = 34
         let monthH: CGFloat = 14
         let maxValue = series.days.map { metric.value($0) }.max() ?? 0
-        let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-        let gridWidth = labelW + CGFloat(weeks.count) * size + CGFloat(max(0, weeks.count - 1)) * gap
-        let gridHeight = monthH + 7 * size + 7 * gap
 
-        let grid = VStack(alignment: .leading, spacing: gap) {
-            HStack(spacing: gap) {
-                Color.clear.frame(width: labelW, height: monthH)
-                ForEach(Array(weeks.enumerated()), id: \.offset) { index, week in
-                    Text(monthLabel(week: week, index: index, weeks: weeks))
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(D.muted)
-                        .fixedSize()
-                        .frame(width: size, height: monthH, alignment: .bottomLeading)
-                }
-            }
+        return AnyView(
+            GeometryReader { geo in
+                let gapWidth = CGFloat(max(0, weeks.count - 1)) * gap
+                let fittedSize = (geo.size.width - gapWidth) / CGFloat(weeks.count)
+                let size = min(20, max(8, fittedSize))
+                let gridWidth = CGFloat(weeks.count) * size + gapWidth
+                let labels = monthLabels(weeks: weeks, size: size, gap: gap)
 
-            ForEach(0..<7, id: \.self) { weekday in
-                HStack(spacing: gap) {
-                    Text(weekday % 2 == 0 ? weekdays[weekday] : "")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(D.muted)
-                        .fixedSize()
-                        .padding(.trailing, 4)
-                        .frame(width: labelW, height: size, alignment: .trailing)
-                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                        if weekday < week.count, let day = week[weekday] {
-                            calendarCell(day: day, size: size, maxValue: maxValue)
-                        } else {
-                            Color.clear.frame(width: size, height: size)
+                let grid = VStack(alignment: .leading, spacing: gap) {
+                    ForEach(0..<7, id: \.self) { weekday in
+                        HStack(spacing: gap) {
+                            ForEach(Array(weeks.enumerated()), id: \.offset) { weekIndex, week in
+                                if weekday < week.count, let day = week[weekday] {
+                                    calendarCell(
+                                        day: day,
+                                        size: size,
+                                        maxValue: maxValue,
+                                        weekIndex: weekIndex,
+                                        weekCount: weeks.count
+                                    )
+                                } else {
+                                    Color.clear.frame(width: size, height: size)
+                                }
+                            }
+                        }
+                    }
+
+                    HStack(spacing: gap) {
+                        ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
+                            Text(label)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(D.muted)
+                                .fixedSize()
+                                .frame(width: size, height: monthH, alignment: .topLeading)
                         }
                     }
                 }
-            }
-        }
 
-        // Center like the web (`mx-auto`); scroll horizontally when it can't fit.
-        return AnyView(
-            GeometryReader { geo in
                 if gridWidth <= geo.size.width {
                     HStack(spacing: 0) {
-                        Spacer(minLength: 0)
                         grid
+                            .frame(width: gridWidth, alignment: .leading)
                         Spacer(minLength: 0)
                     }
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) { grid }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        grid.frame(width: gridWidth, alignment: .leading)
+                    }
                 }
             }
-            .frame(height: gridHeight)
+            // The maximum 20pt cell size determines the stable card height.
+            // Smaller long-range cells remain top-aligned without changing the card layout.
+            .frame(height: 7 * 20 + 6 * gap + gap + monthH)
         )
     }
 
     @ViewBuilder
-    private func calendarCell(day: CalendarDay, size: CGFloat, maxValue: Int64) -> some View {
+    private func calendarCell(
+        day: CalendarDay,
+        size: CGFloat,
+        maxValue: Int64,
+        weekIndex: Int,
+        weekCount: Int
+    ) -> some View {
         if !day.inRange {
             // Out-of-range days are transparent placeholders (web renders no border).
             Color.clear.frame(width: size, height: size)
         } else {
             let level = Self.level(value: day.value, maxValue: maxValue)
             let isHovered = hover?.id == day.date
+            let tooltipAlignment: Alignment = weekIndex == 0
+                ? .topLeading
+                : (weekIndex == weekCount - 1 ? .topTrailing : .top)
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .fill(level == 0 ? D.cellEmpty : D.primary.opacity(Self.LEVEL_PCT[level] / 100))
                 .frame(width: size, height: size)
@@ -1085,7 +1060,7 @@ struct HeatmapCard: View {
                         hover = nil
                     }
                 }
-                .overlay(alignment: .top) {
+                .overlay(alignment: tooltipAlignment) {
                     if isHovered {
                         tooltipBubble(tip: hover)
                     }
@@ -1135,9 +1110,19 @@ struct HeatmapCard: View {
 
         let values = Dictionary(uniqueKeysWithValues: series.days.map { ($0.day, metric.value($0)) })
 
+        // Keep a full-year calendar canvas like Codex's activity view. Short
+        // filters still control the values and totals, while earlier dates are
+        // rendered as quiet empty cells so the heatmap remains a readable
+        // timeline instead of collapsing into a few isolated columns.
+        let currentMonthStart = cal.date(
+            from: cal.dateComponents([.year, .month], from: lastDate)
+        ) ?? lastDate
+        let annualStart = cal.date(byAdding: .month, value: -11, to: currentMonthStart) ?? firstDate
+        let displayFirstDate = min(firstDate, annualStart)
+
         // Align to week boundaries (Monday-start).
-        let weekdayOfFirst = (cal.component(.weekday, from: firstDate) + 5) % 7
-        let start = cal.date(byAdding: .day, value: -weekdayOfFirst, to: firstDate) ?? firstDate
+        let weekdayOfFirst = (cal.component(.weekday, from: displayFirstDate) + 5) % 7
+        let start = cal.date(byAdding: .day, value: -weekdayOfFirst, to: displayFirstDate) ?? displayFirstDate
         let weekdayOfLast = (cal.component(.weekday, from: lastDate) + 5) % 7
         let end = cal.date(byAdding: .day, value: 6 - weekdayOfLast, to: lastDate) ?? lastDate
 
@@ -1146,7 +1131,7 @@ struct HeatmapCard: View {
         var week: [CalendarDay?] = []
         while current <= end && weeks.count < 60 {
             let key = fmt.string(from: current)
-            let inRange = current >= firstDate && current <= lastDate
+            let inRange = current >= displayFirstDate && current <= lastDate
             week.append(CalendarDay(date: key, value: values[key] ?? 0, inRange: inRange))
             if week.count == 7 {
                 weeks.append(week)
@@ -1158,16 +1143,27 @@ struct HeatmapCard: View {
         return weeks
     }
 
-    private func monthLabel(week: [CalendarDay?], index: Int, weeks: [[CalendarDay?]]) -> String {
-        guard let firstDate = week.compactMap({ $0 }).first?.date else { return "" }
-        let parts = firstDate.split(separator: "-")
-        guard parts.count == 3 else { return "" }
-        if index > 0,
-           let prevDate = weeks[safe: index - 1]?.compactMap({ $0 }).first?.date.split(separator: "-"),
-           prevDate.count == 3, prevDate[1] == parts[1] {
-            return ""
+    private func monthLabels(weeks: [[CalendarDay?]], size: CGFloat, gap: CGFloat) -> [String] {
+        var labels = Array(repeating: "", count: weeks.count)
+        var previousMonth: Substring?
+        var lastVisibleX = -CGFloat.infinity
+        let stride = size + gap
+
+        for (index, week) in weeks.enumerated() {
+            guard let firstDate = week.compactMap({ $0 }).first(where: { $0.inRange })?.date else { continue }
+            let parts = firstDate.split(separator: "-")
+            guard parts.count == 3 else { continue }
+
+            let month = parts[1]
+            guard month != previousMonth else { continue }
+            previousMonth = month
+
+            let x = CGFloat(index) * stride
+            guard x - lastVisibleX >= 24 else { continue }
+            labels[index] = "\(month)月"
+            lastVisibleX = x
         }
-        return "\(parts[1])月"
+        return labels
     }
 
     // MARK: legend
@@ -1202,12 +1198,6 @@ struct HeatmapCard: View {
             }
         }
         .padding(.top, 4)
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }
 

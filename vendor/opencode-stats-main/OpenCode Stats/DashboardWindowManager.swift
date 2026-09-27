@@ -68,6 +68,7 @@ final class DashboardWindowManager: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         if OpenCodeDatabase.shared.dbExists {
+            OpenCodeDatabase.shared.daysFilter = DashboardDateRange.dayCount
             OpenCodeDatabase.shared.refresh()
         }
         startAutoRefresh()
@@ -84,6 +85,7 @@ final class DashboardWindowManager: NSObject, NSWindowDelegate {
         let timer = Timer(timeInterval: 45, repeats: true) { [weak self] _ in
             guard let self, self.isVisible else { return }
             if OpenCodeDatabase.shared.dbExists, !OpenCodeDatabase.shared.isLoading {
+                OpenCodeDatabase.shared.daysFilter = DashboardDateRange.dayCount
                 OpenCodeDatabase.shared.refresh(backgroundTriggered: true)
             }
         }
