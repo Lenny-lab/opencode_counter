@@ -51,6 +51,72 @@ enum Formatters {
         return String(format: "%.1f%%", value)
     }
 
+    private static let groupedFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
+
+    /// Fully grouped value, e.g. `242,314,082` — matches web `formatNumber`.
+    static func full(_ value: Int64) -> String {
+        groupedFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    static func full(_ value: Double) -> String {
+        groupedFormatter.string(from: NSNumber(value: Int64(value.rounded()))) ?? "\(value)"
+    }
+
+    /// Axis label style — mirrors web `formatAxisValue` (zh): 亿 / 万 / k.
+    static func axis(_ value: Int64) -> String {
+        let d = Double(value)
+        if d >= 100_000_000 { return String(format: "%.1f亿", d / 100_000_000) }
+        if d >= 10_000_000 { return String(format: "%.0f万", d / 10_000) }
+        if d >= 10_000 { return String(format: "%.1f万", d / 10_000) }
+        if d >= 1_000 { return String(format: "%.1fk", d / 1_000) }
+        return full(value)
+    }
+
+    /// Compact value — mirrors web `formatCompact` (zh-CN notation).
+    static func compact(_ value: Int64) -> String {
+        let d = Double(value)
+        if d >= 100_000_000 { return String(format: "%.1f亿", d / 100_000_000) }
+        if d >= 10_000 {
+            let v = d / 10_000
+            return v == v.rounded() ? String(format: "%.0f万", v) : String(format: "%.1f万", v)
+        }
+        return full(value)
+    }
+
+    /// `2026-09-26` → `09/26` (web `formatDateLabel` short).
+    static func monthDay(_ day: String) -> String {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3 else { return day }
+        return "\(parts[1])/\(parts[2])"
+    }
+
+    /// `2026-09-26` → `2026/09/26` (web `formatDateLabel` long, zh-CN).
+    static func yearMonthDay(_ day: String) -> String {
+        let parts = day.split(separator: "-")
+        guard parts.count == 3 else { return day }
+        return "\(parts[0])/\(parts[1])/\(parts[2])"
+    }
+
+    /// Timestamp → `09/26 21:32` (web `formatDateTime`, zh-CN).
+    static func monthDayTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM/dd HH:mm"
+        return f.string(from: date)
+    }
+
+    /// Current UTC offset, e.g. `+08:00`.
+    static func utcOffset() -> String {
+        let seconds = TimeZone.current.secondsFromGMT()
+        let sign = seconds >= 0 ? "+" : "-"
+        let abs = abs(seconds)
+        return String(format: "%@%02d:%02d", sign, abs / 3600, (abs % 3600) / 60)
+    }
+
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short

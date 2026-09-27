@@ -29,14 +29,18 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
 
     private override init() {}
 
+    var isVisible: Bool {
+        windowController.window?.isVisible ?? false
+    }
+
     func show() {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
+        AppActivationPolicy.sync()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        AppActivationPolicy.sync()
     }
 }

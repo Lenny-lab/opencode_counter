@@ -70,6 +70,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start Sparkle updater (disabled in this local build)
         updaterManager.start()
+
+        // Open the full-size native dashboard window on launch so a normal
+        // double-click gives you the complete page (menu bar item stays too).
+        DashboardWindowManager.shared.show()
+
+        // Headless end-to-end hook: `open -a ... --args -AutoExport` exports
+        // the full history to ~/Downloads and prints the resulting path.
+        if CommandLine.arguments.contains("-AutoExport") {
+            let dbPath = OpenCodeDatabase.shared.dbPath
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let r = try ExportSheet.runExport(dbPath: dbPath, selection: .all)
+                    print("[AutoExport] OK \(r.url.path) days=\(r.dayCount)")
+                } catch {
+                    print("[AutoExport] FAIL \(error)")
+                }
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -92,6 +110,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if event.type == .rightMouseUp {
             // Show context menu
             let menu = NSMenu()
+
+            let dashboardItem = NSMenuItem(title: "Open Dashboard", action: #selector(openDashboard), keyEquivalent: "d")
+            dashboardItem.target = self
+            menu.addItem(dashboardItem)
 
             let aboutItem = NSMenuItem(title: "About OpenCode Stats", action: #selector(openAbout), keyEquivalent: "")
             aboutItem.target = self
@@ -160,13 +182,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowManager.shared.show()
     }
 
+    @objc private func openDashboard() {
+        DashboardWindowManager.shared.show()
+    }
+
     @objc private func checkForUpdates() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         updaterManager.checkForUpdates()
-        // Switch back to accessory after a delay
+        // Switch back after a delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            NSApp.setActivationPolicy(.accessory)
+            AppActivationPolicy.sync()
         }
     }
 
@@ -184,7 +210,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         ])
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            NSApp.setActivationPolicy(.accessory)
+            AppActivationPolicy.sync()
         }
     }
 

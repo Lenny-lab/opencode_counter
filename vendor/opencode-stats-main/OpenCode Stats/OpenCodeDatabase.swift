@@ -15,6 +15,7 @@ import Darwin
 struct OpenCodeStats {
     var sessionCount: Int = 0
     var messageCount: Int = 0
+    var assistantMessageCount: Int = 0
     var dayCount: Int = 0
     var totalCost: Double = 0
     var avgCostPerDay: Double = 0
@@ -36,6 +37,8 @@ struct OpenCodeStats {
     var todayCost: Double = 0
     var firstSessionDate: Date?
     var lastSessionDate: Date?
+    var heatmap: [HeatmapCell] = []
+    var providerUsage: [ProviderUsageItem] = []
 }
 
 struct DailyCost: Identifiable {
@@ -103,6 +106,38 @@ struct ModelUsageItem: Identifiable {
     }
 }
 
+/// One cell of the activity heatmap: token total for a 2-hour block of a day.
+struct HeatmapCell: Identifiable {
+    let day: String // yyyy-MM-dd
+    let block: Int // 0, 2, 4, … 22 (local time)
+    let tokens: Int64
+    var input: Int64 = 0
+    var output: Int64 = 0
+    var reasoning: Int64 = 0
+    var cacheRead: Int64 = 0
+    var cacheWrite: Int64 = 0
+    var messageCount: Int = 0
+    var userCount: Int = 0
+
+    var id: String { "\(day)#\(block)" }
+}
+
+struct ProviderUsageItem: Identifiable {
+    let id = UUID()
+    let provider: String
+    let count: Int
+    let cost: Double
+    let inputTokens: Int64
+    let outputTokens: Int64
+    let reasoningTokens: Int64
+    let cacheRead: Int64
+    let cacheWrite: Int64
+
+    var totalTokens: Int64 {
+        inputTokens + outputTokens + reasoningTokens + cacheRead + cacheWrite
+    }
+}
+
 struct ProjectStats: Identifiable {
     let id: String
     let name: String
@@ -132,7 +167,7 @@ class OpenCodeDatabase: ObservableObject {
     @Published var stats = OpenCodeStats()
     @Published var isLoading = false
     @Published var error: String?
-    @Published var daysFilter: Int? = nil // nil = all time
+    @Published var daysFilter: Int? = 30 // nil = all time (web defaults to "30")
     @Published private(set) var liveState = OpenCodeLiveState()
 
     private var db: OpaquePointer?
@@ -343,8 +378,11 @@ class OpenCodeDatabase: ObservableObject {
 
         var stats = OpenCodeStats()
 
+        // Web `resolve_day_window`: exactly `days` calendar days ending today.
         let dateFilter = daysFilter.map { days -> Int64 in
-            let cutoff = Date().addingTimeInterval(Double(-days * 86400))
+            let cal = Calendar.current
+            let start = cal.startOfDay(for: Date())
+            let cutoff = cal.date(byAdding: .day, value: -(days - 1), to: start) ?? start
             return Int64(cutoff.timeIntervalSince1970 * 1000)
         }
 
@@ -400,7 +438,7 @@ class OpenCodeDatabase: ObservableObject {
             """
         }
         if let row = try querySingle(db: db, sql: msgQuery) {
-            stats.messageCount = row[0] as? Int ?? 0
+            stats.assistantMessageCount = row[0] as? Int ?? 0
             stats.totalCost = doubleValue(row[1])
             stats.totalInputTokens = int64Value(row[2])
             stats.totalOutputTokens = int64Value(row[3])
@@ -588,6 +626,114 @@ class OpenCodeDatabase: ObservableObject {
                 )
             }
             .sorted { $0.count > $1.count }
+
+        // Activity heatmap: token totals per 2-hour block (local time),
+        // using the same message-time window as the rest of the range filter.
+        // Also aggregates each token part + user message counts so the native
+        // dashboard can render metric-switched charts like the web dashboard.
+        func partSum(_ key: String) -> String {
+            """
+            SUM(CASE WHEN json_extract(m.data, '$.role') = 'assistant'
+                     THEN COALESCE(json_extract(m.data, '$.tokens.\(key)'), 0)
+                     ELSE 0 END)
+            """
+        }
+        let heatmapSelect = """
+            SELECT date(m.time_created/1000, 'unixepoch', 'localtime') as day,
+                   (CAST(strftime('%H', m.time_created/1000, 'unixepoch', 'localtime') AS INTEGER) / 2) * 2 as block,
+                   COUNT(*) as msg_count,
+                   SUM(CASE WHEN json_extract(m.data, '$.role') = 'user' THEN 1 ELSE 0 END) as user_count,
+                   \(partSum("input")) as t_in,
+                   \(partSum("output")) as t_out,
+                   \(partSum("reasoning")) as t_reason,
+                   \(partSum("cache.read")) as t_cr,
+                   \(partSum("cache.write")) as t_cw
+            FROM message m
+            JOIN session s ON s.id = m.session_id
+        """
+        let heatmapQuery: String
+        if let cutoff = dateFilter {
+            heatmapQuery = heatmapSelect
+                + "\nWHERE m.time_created >= \(cutoff)"
+                + "\nGROUP BY day, block"
+                + "\nORDER BY day, block"
+        } else {
+            heatmapQuery = heatmapSelect
+                + "\nGROUP BY day, block"
+                + "\nORDER BY day, block"
+        }
+        let heatmapRows = try queryRows(db: db, sql: heatmapQuery)
+        stats.heatmap = heatmapRows.map { row in
+            let input = int64Value(row[4])
+            let output = int64Value(row[5])
+            let reasoning = int64Value(row[6])
+            let cacheRead = int64Value(row[7])
+            let cacheWrite = int64Value(row[8])
+            return HeatmapCell(
+                day: row[0] as? String ?? "",
+                block: row[1] as? Int ?? 0,
+                tokens: input + output + reasoning + cacheRead + cacheWrite,
+                input: input,
+                output: output,
+                reasoning: reasoning,
+                cacheRead: cacheRead,
+                cacheWrite: cacheWrite,
+                messageCount: row[2] as? Int ?? 0,
+                userCount: row[3] as? Int ?? 0
+            )
+        }
+
+        // Provider breakdown (same window and grouping level as model usage)
+        let providerQuery: String
+        if let cutoff = dateFilter {
+            providerQuery = """
+                SELECT
+                    COALESCE(json_extract(m.data, '$.providerID'), 'unknown') as provider,
+                    COUNT(*) as cnt,
+                    COALESCE(SUM(json_extract(m.data, '$.cost')), 0) as cost,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.input')), 0) as t_in,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.output')), 0) as t_out,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.reasoning')), 0) as t_reason,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.cache.read')), 0) as t_cache_read,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.cache.write')), 0) as t_cache_write
+                FROM message m
+                JOIN session s ON s.id = m.session_id
+                WHERE json_extract(m.data, '$.role') = 'assistant'
+                  AND s.time_created >= \(cutoff)
+                GROUP BY provider
+                ORDER BY cnt DESC
+            """
+        } else {
+            providerQuery = """
+                SELECT
+                    COALESCE(json_extract(m.data, '$.providerID'), 'unknown') as provider,
+                    COUNT(*) as cnt,
+                    COALESCE(SUM(json_extract(m.data, '$.cost')), 0) as cost,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.input')), 0) as t_in,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.output')), 0) as t_out,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.reasoning')), 0) as t_reason,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.cache.read')), 0) as t_cache_read,
+                    COALESCE(SUM(json_extract(m.data, '$.tokens.cache.write')), 0) as t_cache_write
+                FROM message m
+                JOIN session s ON s.id = m.session_id
+                WHERE json_extract(m.data, '$.role') = 'assistant'
+                GROUP BY provider
+                ORDER BY cnt DESC
+            """
+        }
+        let providerRows = try queryRows(db: db, sql: providerQuery)
+        stats.providerUsage = providerRows.map { row in
+            ProviderUsageItem(
+                provider: row[0] as? String ?? "unknown",
+                count: row[1] as? Int ?? 0,
+                cost: doubleValue(row[2]),
+                inputTokens: int64Value(row[3]),
+                outputTokens: int64Value(row[4]),
+                reasoningTokens: int64Value(row[5]),
+                cacheRead: int64Value(row[6]),
+                cacheWrite: int64Value(row[7])
+            )
+        }
 
         // Project breakdown
         let projectQuery: String
