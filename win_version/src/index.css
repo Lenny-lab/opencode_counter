@@ -1,0 +1,83 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/**
+ * The palette is lifted verbatim from the macOS build so both products read as
+ * the same tool. Only the font stack changes: Windows already ships Segoe UI
+ * Variable, and using it beats bundling a webfont for no visual gain.
+ */
+@theme {
+  --color-background: #04060d;
+  --color-foreground: #edeef2;
+  --color-muted: #888f9f;
+  --color-primary: #6492ff;
+  --color-chart-1: #5d90ff;
+  --color-chart-2: #00c59e;
+  --color-chart-3: #e49e22;
+  --color-chart-4: #d54ecd;
+  --color-chart-5: #886bee;
+
+  --color-token-total: #86a8ff;
+  --color-token-input: #7ad7ff;
+  --color-token-output: #f3b56f;
+  --color-token-reasoning: #ff8cc6;
+  --color-token-cache-read: #9e8cff;
+  --color-token-cache-write: #ff9e6e;
+  --color-token-user: #b7ef6d;
+
+  --color-cache-miss: #f87171;
+  --color-cache-expected: #fbbf24;
+  --color-cache-hit: #34d399;
+
+  --color-live: #34d399;
+  --color-recent: #e49e22;
+
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* The popover has no chrome, so it drags from anywhere that is not a control. */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+/* Numbers line up in tables and stat rows only if they share a figure style. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

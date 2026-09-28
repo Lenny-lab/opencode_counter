@@ -1,0 +1,36 @@
+[package]
+name = "opencode-stats-win"
+version = "1.0.0"
+description = "OpenCode usage monitor for Windows"
+authors = ["putou"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "opencode_stats_win_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[features]
+# Enables extra runtime logging through stdout.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
