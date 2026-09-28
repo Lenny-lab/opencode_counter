@@ -174,11 +174,11 @@ class OpenCodeDatabase: ObservableObject {
     private let watcherQueue = DispatchQueue(label: "OpenCodeDatabase.Watcher")
     private var watchSources: [DispatchSourceFileSystemObject] = []
     private var liveRefreshWorkItem: DispatchWorkItem?
-    private var popoverRefreshWorkItem: DispatchWorkItem?
     private var refreshQueued = false
     private var fallbackRefreshTimer: Timer?
     private var isPopoverVisible = false
     private var lastWatcherRefreshAt = Date.distantPast
+    private var lastRefreshAt = Date.distantPast
 
     static let shared = OpenCodeDatabase()
     static let refreshInterval: TimeInterval = 15 * 60
@@ -231,8 +231,6 @@ class OpenCodeDatabase: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.fallbackRefreshTimer?.invalidate()
             self?.fallbackRefreshTimer = nil
-            self?.popoverRefreshWorkItem?.cancel()
-            self?.popoverRefreshWorkItem = nil
         }
 
         watcherQueue.async { [weak self] in
@@ -247,7 +245,9 @@ class OpenCodeDatabase: ObservableObject {
 
     func setPopoverVisible(_ visible: Bool) {
         isPopoverVisible = visible
-        if visible {
+        // Only pay for a full reload when the cached stats are older than the
+        // refresh interval; opening the popover must stay instant.
+        if visible, Date().timeIntervalSince(lastRefreshAt) >= Self.refreshInterval {
             refresh()
         }
     }
@@ -282,6 +282,7 @@ class OpenCodeDatabase: ObservableObject {
                 DispatchQueue.main.async {
                     self.stats = result
                     self.isLoading = false
+                    self.lastRefreshAt = Date()
                     if self.refreshQueued {
                         self.refreshQueued = false
                         self.refresh()
@@ -339,10 +340,6 @@ class OpenCodeDatabase: ObservableObject {
                         updatedStats.todayTokens = liveState.todayTokens
                         self.stats = updatedStats
                     }
-
-                    if self.isPopoverVisible {
-                        self.schedulePopoverRefresh()
-                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -350,19 +347,6 @@ class OpenCodeDatabase: ObservableObject {
                 }
             }
         }
-    }
-
-    /// Debounced full refresh for when popover is visible (5 second debounce).
-    /// Prevents cascade of heavy SQL queries during active coding sessions.
-    private func schedulePopoverRefresh() {
-        popoverRefreshWorkItem?.cancel()
-
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.refresh(backgroundTriggered: true)
-        }
-
-        popoverRefreshWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: workItem)
     }
 
     private func loadStats() throws -> OpenCodeStats {

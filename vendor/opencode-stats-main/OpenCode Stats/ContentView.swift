@@ -635,12 +635,14 @@ struct SessionsTab: View {
 
 struct DailyCostChart: View {
     let data: [DailyCost]
+    // Parse once per view value; a computed property here re-created a
+    // DateFormatter on every access and stalled the popover while rendering.
+    private let parsedData: [(date: Date, cost: Double)]
 
-    private var parsedData: [(date: Date, cost: Double)] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return data.compactMap { item in
-            guard let date = formatter.date(from: item.date) else { return nil }
+    init(data: [DailyCost]) {
+        self.data = data
+        self.parsedData = data.compactMap { item in
+            guard let date = Formatters.day.date(from: item.date) else { return nil }
             return (date: date, cost: item.cost)
         }
     }
@@ -682,12 +684,13 @@ struct DailyCostChart: View {
 
 struct DailyTokensChart: View {
     let data: [DailyCost]
+    // See DailyCostChart: parse once per view value, never per access.
+    private let parsedData: [(date: Date, tokens: Double)]
 
-    private var parsedData: [(date: Date, tokens: Double)] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return data.compactMap { item in
-            guard let date = formatter.date(from: item.date) else { return nil }
+    init(data: [DailyCost]) {
+        self.data = data
+        self.parsedData = data.compactMap { item in
+            guard let date = Formatters.day.date(from: item.date) else { return nil }
             return (date: date, tokens: Double(item.tokens))
         }
     }

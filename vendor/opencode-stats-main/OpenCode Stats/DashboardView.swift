@@ -1102,8 +1102,7 @@ struct HeatmapCard: View {
 
     private var calendarWeeks: [[CalendarDay?]] {
         let cal = Calendar.current
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
+        let fmt = Formatters.day
         guard let firstStr = series.days.first?.day,
               let lastStr = series.days.last?.day,
               let firstDate = fmt.date(from: firstStr),
@@ -1369,14 +1368,22 @@ struct HalfDonut: View {
 struct TrendCard: View {
     let metric: DashMetric
     let series: UsageSeries
+    // Parse days once per view value. The old computed property created a
+    // DateFormatter and re-parsed every day on *each* access (including once
+    // per point inside the Chart closure), which blocked the main thread for
+    // many seconds while the chart laid out.
+    private let points: [(date: Date, value: Double)]
+    private let peak: (date: Date, value: Double)?
 
-    private var points: [(date: Date, value: Double)] {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        return series.days.compactMap { day in
-            guard let date = fmt.date(from: day.day) else { return nil }
+    init(metric: DashMetric, series: UsageSeries) {
+        self.metric = metric
+        self.series = series
+        let parsed: [(date: Date, value: Double)] = series.days.compactMap { day in
+            guard let date = Formatters.day.date(from: day.day) else { return nil }
             return (date, Double(metric.value(day)))
         }
+        self.points = parsed
+        self.peak = parsed.max(by: { $0.value < $1.value })
     }
 
     private var xStride: Int {
@@ -1420,7 +1427,7 @@ struct TrendCard: View {
                         .lineStyle(StrokeStyle(lineWidth: 2))
                         .interpolationMethod(.monotone)
 
-                        if let peak = points.max(by: { $0.value < $1.value }),
+                        if let peak,
                            peak.date == point.date {
                             PointMark(
                                 x: .value("日期", point.date, unit: .day),
@@ -1728,12 +1735,14 @@ struct ProviderCard: View {
 
 struct CacheCard: View {
     let series: UsageSeries
+    // Parse once per view value (see TrendCard for why this must not be a
+    // computed property creating a DateFormatter per access).
+    private let daily: [(date: Date, value: Double)]
 
-    private var daily: [(date: Date, value: Double)] {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        return series.days.compactMap { day in
-            guard day.inputSide > 0, let date = fmt.date(from: day.day) else { return nil }
+    init(series: UsageSeries) {
+        self.series = series
+        self.daily = series.days.compactMap { day in
+            guard day.inputSide > 0, let date = Formatters.day.date(from: day.day) else { return nil }
             return (date, series.hitRate(on: day))
         }
     }

@@ -102,11 +102,25 @@ enum Formatters {
         return "\(parts[0])/\(parts[1])/\(parts[2])"
     }
 
+    /// Cached `yyyy-MM-dd` day formatter shared by all views.
+    /// Creating a DateFormatter costs tens of milliseconds (ICU data), so never
+    /// create one per view evaluation — that alone caused multi-second layout
+    /// storms on the dashboard.
+    static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     /// Timestamp → `09/26 21:32` (web `formatDateTime`, zh-CN).
-    static func monthDayTime(_ date: Date) -> String {
+    static let monthDayTimeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MM/dd HH:mm"
-        return f.string(from: date)
+        return f
+    }()
+
+    static func monthDayTime(_ date: Date) -> String {
+        monthDayTimeFormatter.string(from: date)
     }
 
     /// Current UTC offset, e.g. `+08:00`.

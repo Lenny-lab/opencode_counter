@@ -94,6 +94,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         OpenCodeDatabase.shared.stopMonitoring()
     }
 
+    // Re-open the dashboard when the app icon is clicked while it is already
+    // running but no window is visible (double-clicking the app in Finder /
+    // Launchpad / Dock would otherwise do nothing).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows {
+            DashboardWindowManager.shared.show()
+            return false
+        }
+        return true
+    }
+
     private func updateMenuBar(_ stats: OpenCodeStats) {
         guard let button = statusItem.button else { return }
         let tokens = Formatters.tokens(stats.todayTokens)
@@ -171,6 +182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if popover.isShown {
                 popover.performClose(nil)
             } else {
+                NSApp.activate(ignoringOtherApps: true)
                 OpenCodeDatabase.shared.setPopoverVisible(true)
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
                 popover.contentViewController?.view.window?.makeKey()
