@@ -22,3 +22,6 @@ release/staging/
 # Logs
 logs/
 *.log
+
+# Machine data for transfer (contains credentials + personal usage DB — never commit)
+opencode-data/
